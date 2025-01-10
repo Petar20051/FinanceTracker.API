@@ -4,17 +4,19 @@ using FinanceTracker.API.SignalR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Text;
 
 namespace FinanceTracker.API.Controllers
 {
-    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class BudgetController : ControllerBase
     {
         private readonly FinanceTrackerDbContext _context;
-        private  readonly NotificationService _notificationService;
+        private readonly NotificationService _notificationService;
 
         public BudgetController(FinanceTrackerDbContext context, NotificationService notificationService)
         {
@@ -22,30 +24,69 @@ namespace FinanceTracker.API.Controllers
             _notificationService = notificationService;
         }
 
+        // Helper method to extract UserId from JWT token
+        private string GetUserIdFromToken()
+        {
+            var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+            if (string.IsNullOrEmpty(token)) return null;
+
+            var handler = new JwtSecurityTokenHandler();
+            var jsonToken = handler.ReadToken(token) as JwtSecurityToken;
+            return jsonToken?.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetBudgets()
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            var budgets = await _context.Budgets.Where(b => b.UserId == userId).ToListAsync();
-            return Ok(budgets);
+            var userId = GetUserIdFromToken();
+            if (userId == null)
+                return Unauthorized(new { Message = "User not authenticated." });
+
+            var budgets = await _context.Budgets
+                .Where(b => b.UserId == userId)
+                .Select(b => new
+                {
+                    b.Id, // Include ID
+                    b.Category,
+                    b.Limit,
+                    b.Spent
+                })
+                .ToListAsync();
+
+            if (!budgets.Any())
+                return Ok(new { Message = "No budgets available." });
+
+            return Ok(new { Data = budgets });
         }
+
+
 
         [HttpPost]
         public async Task<IActionResult> AddBudget([FromBody] Budget budget)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            budget.UserId = userId;
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var userId = GetUserIdFromToken(); // Extract UserId from the token
+            if (userId == null)
+                return Unauthorized(new { Message = "User not authenticated." });
+
+            budget.UserId = userId; // Set UserId from the token
+
             _context.Budgets.Add(budget);
             await _context.SaveChangesAsync();
+
             return CreatedAtAction(nameof(GetBudgets), new { id = budget.Id }, budget);
         }
 
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateBudget(int id, [FromBody] Budget updatedBudget)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            var budget = await _context.Budgets.FirstOrDefaultAsync(b => b.Id == id && b.UserId == userId);
+            var userId = GetUserIdFromToken(); // Extract UserId from the token
+            if (userId == null)
+                return Unauthorized(new { Message = "User not authenticated." });
 
+            var budget = await _context.Budgets.FirstOrDefaultAsync(b => b.Id == id && b.UserId == userId);
             if (budget == null)
                 return NotFound();
 
@@ -55,64 +96,77 @@ namespace FinanceTracker.API.Controllers
 
             _context.Budgets.Update(budget);
             await _context.SaveChangesAsync();
+
             return NoContent();
         }
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteBudget(int id)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            var budget = await _context.Budgets.FirstOrDefaultAsync(b => b.Id == id && b.UserId == userId);
+            var userId = GetUserIdFromToken(); // Extract UserId from the token
+            if (userId == null)
+                return Unauthorized(new { Message = "User not authenticated." });
 
+            var budget = await _context.Budgets.FirstOrDefaultAsync(b => b.Id == id && b.UserId == userId);
             if (budget == null)
                 return NotFound();
 
             _context.Budgets.Remove(budget);
             await _context.SaveChangesAsync();
+
             return NoContent();
         }
 
         [HttpGet("filter")]
-        public async Task<IActionResult> GetFilteredBudgets(
-    [FromQuery] string category,
-    [FromQuery] int page = 1,
-    [FromQuery] int pageSize = 10)
+        public async Task<IActionResult> GetFilteredBudgets([FromQuery] string category)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            var query = _context.Budgets.Where(b => b.UserId == userId);
+            var userId = GetUserIdFromToken();
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized(new { Message = "User not authenticated." });
 
-            if (!string.IsNullOrEmpty(category))
-                query = query.Where(b => b.Category == category);
-
-            var totalItems = await query.CountAsync();
-            var budgets = await query
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
-
-            return Ok(new
+            try
             {
-                TotalItems = totalItems,
-                Page = page,
-                PageSize = pageSize,
-                Data = budgets
-            });
+                var query = _context.Budgets.Where(b => b.UserId == userId);
+
+                if (!string.IsNullOrWhiteSpace(category))
+                {
+                    query = query.Where(b => b.Category.ToLower().Contains(category.ToLower()));
+                }
+
+                var budgets = await query
+                    .Select(b => new
+                    {
+                        b.Id,
+                        b.Category,
+                        b.Limit,
+                        b.Spent
+                    })
+                    .ToListAsync();
+
+                return Ok(budgets);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in GetFilteredBudgets: {ex.Message}");
+                return StatusCode(500, new { Message = "An internal server error occurred.", Details = ex.Message });
+            }
         }
 
         [HttpGet("report/budget-summary")]
         public async Task<IActionResult> GetBudgetSummary()
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userId = GetUserIdFromToken(); // Extract UserId from the token
+            if (userId == null)
+                return Unauthorized(new { Message = "User not authenticated." });
 
             var budgets = await _context.Budgets
                 .Where(b => b.UserId == userId)
                 .Select(b => new
                 {
+                    b.Id,
                     b.Category,
                     b.Limit,
-                    Spent = _context.Expenses
-                        .Where(e => e.UserId == userId && e.Category == b.Category)
-                        .Sum(e => e.Amount)
+                    b.Spent  
                 })
                 .ToListAsync();
 
@@ -122,26 +176,25 @@ namespace FinanceTracker.API.Controllers
         [HttpGet("report/budget-performance")]
         public async Task<IActionResult> GetBudgetPerformance()
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userId = GetUserIdFromToken(); // Extract UserId from the token
+            if (userId == null)
+                return Unauthorized(new { Message = "User not authenticated." });
 
             var performance = await _context.Budgets
                 .Where(b => b.UserId == userId)
                 .Select(b => new
                 {
+                    b.Id,
                     b.Category,
                     b.Limit,
                     Spent = _context.Expenses
                         .Where(e => e.UserId == userId && e.Category == b.Category)
                         .Sum(e => e.Amount),
-                    Remaining = b.Limit - _context.Expenses
-                        .Where(e => e.UserId == userId && e.Category == b.Category)
-                        .Sum(e => e.Amount)
+                    Remaining = b.Limit - b.Spent
                 })
                 .ToListAsync();
 
             return Ok(performance);
         }
-
-
     }
 }

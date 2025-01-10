@@ -54,22 +54,19 @@ namespace FinanceTracker.API.Controllers
                 return Unauthorized(new { Message = "Invalid email or password" });
 
             var token = GenerateJwtToken(user);
-            return Ok(new { Token = token });
+            var userid = user.Id;
+            return Ok(new { Token = token, userId = userid });
         }
 
         private string GenerateJwtToken(ApplicationUser user)
         {
             var claims = new[]
             {
-        new Claim(JwtRegisteredClaimNames.Sub, user.Email),
-        new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-        new Claim(ClaimTypes.NameIdentifier, user.Id)
+        new Claim(ClaimTypes.NameIdentifier, user.Id),
+        new Claim(ClaimTypes.Email, user.Email)
     };
 
-            
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]));
-
-            
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var token = new JwtSecurityToken(
@@ -77,11 +74,9 @@ namespace FinanceTracker.API.Controllers
                 audience: _configuration["Jwt:Audience"],
                 claims: claims,
                 expires: DateTime.UtcNow.AddHours(1),
-                signingCredentials: creds
-            );
+                signingCredentials: creds);
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
-
     }
 }

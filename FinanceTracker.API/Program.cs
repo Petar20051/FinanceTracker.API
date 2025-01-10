@@ -42,6 +42,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.Events.OnRedirectToLogin = context =>
+    {
+        context.Response.StatusCode = 401; // Return 401 Unauthorized
+        return Task.CompletedTask;
+    };
+});
+
+
 // Add SignalR and NotificationService
 builder.Services.AddSignalR();
 builder.Services.AddScoped<NotificationService>();
