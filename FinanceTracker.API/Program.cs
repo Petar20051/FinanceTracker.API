@@ -56,7 +56,7 @@ builder.Services.ConfigureApplicationCookie(options =>
 builder.Services.AddSignalR();
 builder.Services.AddScoped<NotificationService>();
 builder.Services.AddHostedService<MonthlySummaryService>();
-builder.Services.AddHttpClient<CurrencyExchangeService>();
+builder.Services.AddSingleton<CurrencyExchangeService>();
 builder.Services.AddHttpClient<BankingService>();
 builder.Services.AddCors(options =>
 {

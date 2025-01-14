@@ -4,38 +4,44 @@ namespace FinanceTracker.API.Banking
 {
     public class CurrencyExchangeService
     {
-        private readonly HttpClient _httpClient;
-        private readonly IConfiguration _configuration;
+        private readonly Dictionary<string, decimal> _exchangeRates;
 
-        public CurrencyExchangeService(HttpClient httpClient, IConfiguration configuration)
+        public CurrencyExchangeService()
         {
-            _httpClient = httpClient;
-            _configuration = configuration;
+          
+            _exchangeRates = new Dictionary<string, decimal>
+            {
+                { "USD:EUR", 0.85m },
+                { "EUR:USD", 1.18m },
+                { "USD:GBP", 0.75m },
+                { "GBP:USD", 1.33m },
+                { "EUR:GBP", 0.88m },
+                { "GBP:EUR", 1.14m },
+                { "USD:JPY", 110.50m },
+                { "JPY:USD", 0.009m },
+                { "EUR:JPY", 130.20m },
+                { "JPY:EUR", 0.0077m },
+                { "USD:BGN", 1.80m },
+                { "BGN:USD", 0.56m },
+                { "EUR:BGN", 1.95m },
+                { "BGN:EUR", 0.51m },
+                { "GBP:BGN", 2.29m },
+                { "BGN:GBP", 0.44m },
+                { "JPY:BGN", 0.016m },
+                { "BGN:JPY", 62.50m }
+            };
         }
 
-        public async Task<decimal> ConvertCurrency(string fromCurrency, string toCurrency, decimal amount)
+        public Task<decimal> ConvertCurrency(string fromCurrency, string toCurrency, decimal amount)
         {
-            var apiKey = _configuration["CurrencyExchange:ApiKey"];
-            var endpoint = $"https://api.exchangeratesapi.io/latest?base={fromCurrency}";
+            var key = $"{fromCurrency.ToUpper()}:{toCurrency.ToUpper()}";
 
-            var response = await _httpClient.GetAsync(endpoint);
-            response.EnsureSuccessStatusCode();
-
-            var content = await response.Content.ReadAsStringAsync();
-            var rates = JsonConvert.DeserializeObject<CurrencyExchangeResponse>(content);
-
-            if (rates.Rates.TryGetValue(toCurrency, out var rate))
+            if (_exchangeRates.TryGetValue(key, out var rate))
             {
-                return amount * (decimal)rate;
+                return Task.FromResult(amount * rate);
             }
 
-            throw new Exception($"Conversion rate for {toCurrency} not found.");
+            throw new Exception($"Conversion rate for {fromCurrency} to {toCurrency} not available.");
         }
     }
-
-    public class CurrencyExchangeResponse
-    {
-        public Dictionary<string, double> Rates { get; set; }
-    }
-
 }

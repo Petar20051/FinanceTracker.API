@@ -6,7 +6,9 @@ using FinanceTracker.API.SignalR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json;
 using System.IdentityModel.Tokens.Jwt;
+using System.Net.Http;
 using System.Security.Claims;
 
 namespace FinanceTracker.API.Controllers
@@ -20,18 +22,21 @@ namespace FinanceTracker.API.Controllers
         private readonly MLModelHelper _mlHelper;
         private readonly BankingService _bankingService;
         private readonly CurrencyExchangeService _currencyExchangeService;
+        private readonly HttpClient _httpClient;
 
         public ExpenseController(
             FinanceTrackerDbContext context,
             NotificationService notificationService,
             CurrencyExchangeService currencyExchangeService,
-            BankingService bankingService)
+            BankingService bankingService,
+            HttpClient httpClient)
         {
             _context = context;
             _notificationService = notificationService;
             _mlHelper = new MLModelHelper(context);
             _currencyExchangeService = currencyExchangeService;
             _bankingService = bankingService;
+            _httpClient = httpClient;
         }
 
         private string GetUserIdFromToken()
@@ -175,37 +180,37 @@ namespace FinanceTracker.API.Controllers
         }
 
         // Filter expenses
-        [HttpGet("filter")]
-        public async Task<IActionResult> GetFilteredExpenses(
-            [FromQuery] DateTime? startDate,
-            [FromQuery] DateTime? endDate,
-            [FromQuery] string category,
-            [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 10)
-        {
-            var userId = GetUserIdFromToken();
-            if (userId == null) return Unauthorized();
+        //[HttpGet("filter")]
+        //public async Task<IActionResult> GetFilteredExpenses(
+        //    [FromQuery] DateTime? startDate,
+        //    [FromQuery] DateTime? endDate,
+        //    [FromQuery] string category,
+        //    [FromQuery] int page = 1,
+        //    [FromQuery] int pageSize = 10)
+        //{
+        //    var userId = GetUserIdFromToken();
+        //    if (userId == null) return Unauthorized();
 
-            var query = _context.Expenses.Where(e => e.UserId == userId);
+        //    var query = _context.Expenses.Where(e => e.UserId == userId);
 
-            if (startDate.HasValue) query = query.Where(e => e.Date >= startDate.Value);
-            if (endDate.HasValue) query = query.Where(e => e.Date <= endDate.Value);
-            if (!string.IsNullOrEmpty(category)) query = query.Where(e => e.Category == category);
+        //    if (startDate.HasValue) query = query.Where(e => e.Date >= startDate.Value);
+        //    if (endDate.HasValue) query = query.Where(e => e.Date <= endDate.Value);
+        //    if (!string.IsNullOrEmpty(category)) query = query.Where(e => e.Category == category);
 
-            var totalItems = await query.CountAsync();
-            var expenses = await query
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
+        //    var totalItems = await query.CountAsync();
+        //    var expenses = await query
+        //        .Skip((page - 1) * pageSize)
+        //        .Take(pageSize)
+        //        .ToListAsync();
 
-            return Ok(new
-            {
-                TotalItems = totalItems,
-                Page = page,
-                PageSize = pageSize,
-                Data = expenses
-            });
-        }
+        //    return Ok(new
+        //    {
+        //        TotalItems = totalItems,
+        //        Page = page,
+        //        PageSize = pageSize,
+        //        Data = expenses
+        //    });
+        //}
 
         // Fetch category summary
         [HttpGet("report/category-summary")]
@@ -293,14 +298,43 @@ namespace FinanceTracker.API.Controllers
 
             return Ok(result);
         }
-
-        // Convert currency
         [HttpPost("convert")]
-        public async Task<IActionResult> ConvertExpense([FromBody] ConversionRequest request)
+        public async Task<IActionResult> ConvertCurrency([FromBody] ConversionRequest request)
         {
-            var convertedAmount = await _currencyExchangeService.ConvertCurrency(request.FromCurrency, request.ToCurrency, request.Amount);
-            return Ok(new { ConvertedAmount = convertedAmount });
+            try
+            {
+                // Validate the request to ensure all required fields are provided
+                if (string.IsNullOrWhiteSpace(request.FromCurrency) ||
+                    string.IsNullOrWhiteSpace(request.ToCurrency) ||
+                    request.Amount <= 0)
+                {
+                    return BadRequest(new { Message = "Invalid input. Please provide valid currencies and a positive amount." });
+                }
+
+                // Perform the currency conversion
+                var convertedAmount = await _currencyExchangeService.ConvertCurrency(request.FromCurrency, request.ToCurrency, request.Amount);
+
+                // Return the converted amount in a structured response
+                return Ok(new { ConvertedAmount = convertedAmount });
+            }
+            catch (Exception ex)
+            {
+                // Log the error details for debugging purposes
+                Console.WriteLine($"Error in ConvertCurrency: {ex.Message}");
+                return BadRequest(new { Message = $"Currency conversion failed: {ex.Message}" });
+            }
         }
+
+
+        // Nested class for conversion request
+        public class ConversionRequest
+        {
+            public string FromCurrency { get; set; }
+            public string ToCurrency { get; set; }
+            public decimal Amount { get; set; }
+        }
+
+
 
         // Sync transactions
         [HttpPost("sync-transactions")]
@@ -345,12 +379,19 @@ namespace FinanceTracker.API.Controllers
         }
 
         // Nested classes for request bodies
-        public class ConversionRequest
+       
+        public class QueryDetails
         {
-            public string FromCurrency { get; set; }
-            public string ToCurrency { get; set; }
+            public string From { get; set; }
+            public string To { get; set; }
             public decimal Amount { get; set; }
         }
+
+        public class RateInfo
+        {
+            public decimal Rate { get; set; }
+        }
+
 
         public class SyncRequest
         {
