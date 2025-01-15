@@ -3,7 +3,7 @@ using FinanceTracker.API.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.ML;
 using Microsoft.ML.Data;
-using Microsoft.ML.Transforms.TimeSeries;
+using Microsoft.ML.Trainers;
 
 namespace FinanceTracker.API.ML
 {
@@ -18,117 +18,221 @@ namespace FinanceTracker.API.ML
             _context = financeTrackerDbContext ?? throw new ArgumentNullException(nameof(financeTrackerDbContext));
         }
 
+        // Prepares historical data for training
         public async Task<List<ExpenseData>> PrepareHistoricalData(string userId)
         {
             var expenses = await _context.Expenses
+                .AsNoTracking()
                 .Where(e => e.UserId == userId)
                 .ToListAsync();
 
             var userIncome = await _context.Users
+                .AsNoTracking()
                 .Where(u => u.Id == userId)
                 .Select(u => u.TotalIncome)
                 .FirstOrDefaultAsync();
 
-            var historicalData = new List<ExpenseData>();
-
-            foreach (var expense in expenses)
+            return expenses.Select(expense => new ExpenseData
             {
-                var isHolidaySeason = IsHolidaySeason(expense.Date);
-                var userSpecificWeight = CalculateUserSpecificWeight(userId, expense.Category);
-
-                historicalData.Add(new ExpenseData
-                {
-                    TotalAmount = (float)expense.Amount,
-                    Income = (float)(userIncome),
-                    Category = expense.Category,
-                    IsHolidaySeason = isHolidaySeason,
-                    UserSpecificWeight = userSpecificWeight
-                });
-            }
-
-            return historicalData;
+                Income = (float)userIncome,
+                Category = expense.Category,
+                IsHolidaySeason = IsHolidaySeason(expense.Date),
+                UserSpecificWeight = CalculateUserSpecificWeight(userId, expense.Category)
+            }).ToList();
         }
 
-        public bool IsHolidaySeason(DateTime date)
+        private bool IsHolidaySeason(DateTime date)
         {
             var holidays = new List<DateTime>
-        {
-            new DateTime(date.Year, 12, 25),
-            new DateTime(date.Year, 1, 1)
-        };
+            {
+                new DateTime(date.Year, 12, 25), // Christmas
+                new DateTime(date.Year, 1, 1)   // New Year
+            };
 
             return holidays.Any(h => h.Month == date.Month && h.Day == date.Day);
         }
 
-        public float CalculateUserSpecificWeight(string userId, string category)
+        private float CalculateUserSpecificWeight(string userId, string category)
         {
             var categorySpending = _context.Expenses
+                .AsNoTracking()
                 .Where(e => e.UserId == userId && e.Category == category)
                 .Sum(e => (float?)e.Amount) ?? 0;
 
             return categorySpending > 1000 ? 1.5f : 1.0f;
         }
 
-        public ITransformer TrainModel(IEnumerable<ExpenseData> historicalData)
-        {
-            if (!historicalData.Any())
-                throw new ArgumentException("Historical data cannot be empty.", nameof(historicalData));
-
-            var dataView = _mlContext.Data.LoadFromEnumerable(historicalData);
-
-            var pipeline = _mlContext.Transforms.Conversion.MapValueToKey(nameof(ExpenseData.Category))
-                .Append(_mlContext.Transforms.Categorical.OneHotEncoding(nameof(ExpenseData.Category)))
-                .Append(_mlContext.Transforms.Concatenate("Features",
-                    nameof(ExpenseData.TotalAmount),
-                    nameof(ExpenseData.Income),
-                    nameof(ExpenseData.IsHolidaySeason),
-                    nameof(ExpenseData.UserSpecificWeight)))
-                .Append(_mlContext.Regression.Trainers.Sdca(
-                    labelColumnName: nameof(ExpenseData.TotalAmount),
-                    featureColumnName: "Features"));
-
-            return pipeline.Fit(dataView);
-        }
-
-        public IEnumerable<float> PredictExpenses(ITransformer model, int horizon, IEnumerable<ExpenseData> futureData)
-        {
-            if (!futureData.Any())
-                throw new ArgumentException("Future data cannot be empty.", nameof(futureData));
-
-            var predictionEngine = _mlContext.Model.CreatePredictionEngine<ExpenseData, ExpensePrediction>(model);
-
-            foreach (var data in futureData)
-            {
-                var prediction = predictionEngine.Predict(data);
-                yield return prediction.PredictedAmount;
-            }
-        }
-        public class ExpenseCategoryPrediction
-        {
-            [ColumnName("PredictedLabel")]
-            public string PredictedCategory { get; set; }
-        }
-
         public ITransformer TrainCategoryPredictionModel(IEnumerable<ExpenseData> expenseData)
         {
-            var dataView = _mlContext.Data.LoadFromEnumerable(expenseData);
+            if (expenseData == null || !expenseData.Any())
+            {
+                throw new ArgumentException("Expense data cannot be null or empty.", nameof(expenseData));
+            }
 
-            var pipeline = _mlContext.Transforms.Text.FeaturizeText("Features", nameof(ExpenseData.Description))
-                .Append(_mlContext.Transforms.Conversion.MapValueToKey(nameof(ExpenseData.Category)))
-                .Append(_mlContext.MulticlassClassification.Trainers.SdcaMaximumEntropy())
-                .Append(_mlContext.Transforms.Conversion.MapKeyToValue("PredictedLabel"));
+            Console.WriteLine($"Preparing data... Total records: {expenseData.Count()}");
 
-            var model = pipeline.Fit(dataView);
-            return model;
+            try
+            {
+                var dataView = _mlContext.Data.LoadFromEnumerable(expenseData);
+                Console.WriteLine("DataView successfully created.");
+
+                var trainerOptions = new SdcaMaximumEntropyMulticlassTrainer.Options
+                {
+                    LabelColumnName = "CategoryKey",
+                    FeatureColumnName = "Features",
+                    MaximumNumberOfIterations = 50,
+                    NumberOfThreads = 1
+                };
+
+                var pipeline = _mlContext.Transforms.Conversion.MapValueToKey("CategoryKey", nameof(ExpenseData.Category))
+                    .Append(_mlContext.Transforms.Text.FeaturizeText("DescriptionFeatures", nameof(ExpenseData.Description)))
+                    .Append(_mlContext.Transforms.Concatenate("Features", "DescriptionFeatures"))
+                    .Append(_mlContext.MulticlassClassification.Trainers.SdcaMaximumEntropy(trainerOptions))
+                    .Append(_mlContext.Transforms.Conversion.MapKeyToValue("PredictedCategory", "PredictedLabel"));
+
+                Console.WriteLine("Starting pipeline training...");
+
+                var startTime = DateTime.UtcNow;
+                var model = pipeline.Fit(dataView);
+                var endTime = DateTime.UtcNow;
+
+                Console.WriteLine($"Pipeline training completed successfully. Duration: {(endTime - startTime).TotalSeconds} seconds.");
+                return model;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error during pipeline execution: {ex.Message}");
+                throw;
+            }
         }
 
         public string PredictCategory(ITransformer model, string description)
         {
+            if (string.IsNullOrWhiteSpace(description))
+                throw new ArgumentException("Description cannot be null or empty.", nameof(description));
+
             var predictionEngine = _mlContext.Model.CreatePredictionEngine<ExpenseData, ExpenseCategoryPrediction>(model);
-            var prediction = predictionEngine.Predict(new ExpenseData { Description = description });
+            var prediction = predictionEngine.Predict(new ExpenseData
+            {
+                Description = description
+            });
+
             return prediction.PredictedCategory;
         }
 
+        public async Task<decimal> PredictNextMonthExpenseForCategoryAsync(string category, string userId)
+        {
+            try
+            {
+                // Validate inputs
+                if (string.IsNullOrWhiteSpace(category))
+                    throw new ArgumentException("Category cannot be null or empty.", nameof(category));
 
+                if (string.IsNullOrWhiteSpace(userId))
+                    throw new ArgumentException("UserId cannot be null or empty.", nameof(userId));
+
+                // Fetch and group historical data
+                var historicalData = await _context.Expenses
+                    .AsNoTracking()
+                    .Where(e => e.UserId == userId && e.Category == category)
+                    .GroupBy(e => new { e.Date.Year, e.Date.Month })
+                    .Select(g => new MonthlyExpenseData
+                    {
+                        Year = g.Key.Year,
+                        Month = g.Key.Month,
+                        TotalAmount = g.Sum(e => (float)e.Amount)
+                    })
+                    .ToListAsync();
+
+                if (!historicalData.Any())
+                    throw new InvalidOperationException("No historical data available for this category.");
+
+                Console.WriteLine($"Fetched {historicalData.Count} historical data records for category: {category}.");
+
+                // Load data into ML.NET IDataView
+                var dataView = _mlContext.Data.LoadFromEnumerable(historicalData);
+                Console.WriteLine("DataView successfully created.");
+
+                // Define the regression trainer options
+                var trainerOptions = new SdcaRegressionTrainer.Options
+                {
+                    LabelColumnName = nameof(MonthlyExpenseData.TotalAmount),
+                    FeatureColumnName = "Features",
+                    MaximumNumberOfIterations = 100,
+                    ConvergenceTolerance = 0.001f
+                };
+
+                // Define and build the ML pipeline
+                var pipeline = _mlContext.Transforms.Conversion.ConvertType(outputColumnName: "YearFloat", inputColumnName: nameof(MonthlyExpenseData.Year), outputKind: DataKind.Single)
+                    .Append(_mlContext.Transforms.Conversion.ConvertType(outputColumnName: "MonthFloat", inputColumnName: nameof(MonthlyExpenseData.Month), outputKind: DataKind.Single))
+                    .Append(_mlContext.Transforms.Concatenate("Features", "YearFloat", "MonthFloat"))
+                    .Append(_mlContext.Regression.Trainers.Sdca(trainerOptions));
+
+                Console.WriteLine("Starting pipeline training...");
+
+                var startTime = DateTime.UtcNow;
+
+                // Train the model
+                var model = pipeline.Fit(dataView);
+
+                var endTime = DateTime.UtcNow;
+                Console.WriteLine($"Pipeline training completed in {(endTime - startTime).TotalSeconds} seconds.");
+
+                // Save the model
+                const string modelPath = "model.zip";
+                _mlContext.Model.Save(model, dataView.Schema, modelPath);
+                Console.WriteLine($"Model saved to {modelPath}.");
+
+                // Prepare the next month's data for prediction
+                var lastData = historicalData.OrderByDescending(h => h.Year).ThenByDescending(h => h.Month).First();
+                var nextMonth = lastData.Month == 12 ? 1 : lastData.Month + 1;
+                var nextYear = lastData.Month == 12 ? lastData.Year + 1 : lastData.Year;
+
+                // Load the model and make predictions
+                var loadedModel = _mlContext.Model.Load(modelPath, out _);
+                var predictionEngine = _mlContext.Model.CreatePredictionEngine<MonthlyExpenseData, MonthlyExpensePrediction>(loadedModel);
+
+                var prediction = predictionEngine.Predict(new MonthlyExpenseData
+                {
+                    Year = nextYear,
+                    Month = nextMonth
+                });
+
+                Console.WriteLine($"Predicted Amount for {nextMonth}/{nextYear}: {prediction.PredictedAmount}");
+
+                return (decimal)prediction.PredictedAmount;
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.WriteLine($"Validation error: {ex.Message}");
+                throw new ArgumentException("Invalid input or insufficient data for prediction.", ex);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error predicting next month's expense: {ex.Message}");
+                throw;
+            }
+        }
+
+
+
+        public class MonthlyExpenseData
+        {
+            public float Year { get; set; }
+            public float Month { get; set; }
+            public float TotalAmount { get; set; }
+        }
+
+        public class MonthlyExpensePrediction
+        {
+            [ColumnName("Score")]
+            public float PredictedAmount { get; set; }
+        }
+
+        public class ExpenseCategoryPrediction
+        {
+            [ColumnName("PredictedCategory")]
+            public string PredictedCategory { get; set; }
+        }
     }
 }

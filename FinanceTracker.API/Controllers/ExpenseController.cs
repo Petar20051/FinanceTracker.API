@@ -49,6 +49,8 @@ namespace FinanceTracker.API.Controllers
             return jsonToken?.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
         }
 
+
+
         [HttpGet]
         public async Task<IActionResult> GetExpenses()
         {
@@ -179,40 +181,7 @@ namespace FinanceTracker.API.Controllers
             return NoContent();
         }
 
-        // Filter expenses
-        //[HttpGet("filter")]
-        //public async Task<IActionResult> GetFilteredExpenses(
-        //    [FromQuery] DateTime? startDate,
-        //    [FromQuery] DateTime? endDate,
-        //    [FromQuery] string category,
-        //    [FromQuery] int page = 1,
-        //    [FromQuery] int pageSize = 10)
-        //{
-        //    var userId = GetUserIdFromToken();
-        //    if (userId == null) return Unauthorized();
-
-        //    var query = _context.Expenses.Where(e => e.UserId == userId);
-
-        //    if (startDate.HasValue) query = query.Where(e => e.Date >= startDate.Value);
-        //    if (endDate.HasValue) query = query.Where(e => e.Date <= endDate.Value);
-        //    if (!string.IsNullOrEmpty(category)) query = query.Where(e => e.Category == category);
-
-        //    var totalItems = await query.CountAsync();
-        //    var expenses = await query
-        //        .Skip((page - 1) * pageSize)
-        //        .Take(pageSize)
-        //        .ToListAsync();
-
-        //    return Ok(new
-        //    {
-        //        TotalItems = totalItems,
-        //        Page = page,
-        //        PageSize = pageSize,
-        //        Data = expenses
-        //    });
-        //}
-
-        // Fetch category summary
+       
         [HttpGet("report/category-summary")]
         public async Task<IActionResult> GetCategorySummary(
             [FromQuery] DateTime? startDate,
@@ -260,44 +229,7 @@ namespace FinanceTracker.API.Controllers
             return Ok(trends);
         }
 
-        // Predict expenses using AI
-        [HttpGet("ai/predict-expenses")]
-        public async Task<IActionResult> PredictExpenses()
-        {
-            var userId = GetUserIdFromToken();
-            if (userId == null) return Unauthorized();
-
-            var historicalData = await _mlHelper.PrepareHistoricalData(userId);
-
-            if (historicalData.Count < 3)
-                return BadRequest("Insufficient data for predictions. At least 3 months of data is required.");
-
-            var model = _mlHelper.TrainModel(historicalData);
-
-            var userTotalIncome = await _context.Users
-                .Where(u => u.Id == userId)
-                .Select(u => u.TotalIncome)
-                .FirstOrDefaultAsync();
-
-            var futureData = Enumerable.Range(1, 3).Select(i => new ExpenseData
-            {
-                Income = (float)userTotalIncome,
-                Category = "General",
-                IsHolidaySeason = _mlHelper.IsHolidaySeason(DateTime.UtcNow.AddMonths(i)),
-                UserSpecificWeight = _mlHelper.CalculateUserSpecificWeight(userId, "General")
-            });
-
-            var predictions = _mlHelper.PredictExpenses(model, 3, futureData);
-
-            var result = predictions.Select((amount, index) => new
-            {
-                Year = DateTime.UtcNow.AddMonths(index + 1).Year,
-                Month = DateTime.UtcNow.AddMonths(index + 1).Month,
-                PredictedAmount = amount
-            });
-
-            return Ok(result);
-        }
+       
         [HttpPost("convert")]
         public async Task<IActionResult> ConvertCurrency([FromBody] ConversionRequest request)
         {
@@ -364,22 +296,88 @@ namespace FinanceTracker.API.Controllers
             return Ok(new { Message = "Transactions synced successfully." });
         }
 
-        // Predict category
         [HttpPost("predict-category")]
         public IActionResult PredictCategory([FromBody] PredictionRequest request)
         {
-            var model = _mlHelper.TrainCategoryPredictionModel(_context.Expenses.Select(e => new ExpenseData
+            if (request == null || string.IsNullOrWhiteSpace(request.Description))
             {
-                Category = e.Category,
-                Description = e.Description
-            }));
+                return BadRequest(new { Message = "Description is required." });
+            }
 
-            var predictedCategory = _mlHelper.PredictCategory(model, request.Description);
-            return Ok(new { PredictedCategory = predictedCategory });
+            try
+            {
+                var userId = GetUserIdFromToken();
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return Unauthorized(new { Message = "User is not authorized." });
+                }
+
+                // Load user-specific expense data
+                var expenseData = _context.Expenses
+                    .Where(e => e.UserId == userId)
+                    .Select(e => new ExpenseData
+                    {
+                        Category = e.Category,
+                        Description = e.Description,
+                        TotalAmount = (float)e.Amount,
+                        UserSpecificWeight = 1.0f // Default weight
+                    }).ToList();
+
+                if (!expenseData.Any())
+                {
+                    return NotFound(new { Message = "No training data available for this user." });
+                }
+
+                // Train the model and predict
+                var model = _mlHelper.TrainCategoryPredictionModel(expenseData);
+                var predictedCategory = _mlHelper.PredictCategory(model, request.Description);
+
+                return Ok(new { PredictedCategory = predictedCategory });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Internal server error: {ex.Message} - {ex.StackTrace}");
+                return StatusCode(500, new { Message = "Internal server error.", Details = ex.Message });
+            }
+        }
+        [HttpPost("predict-next-month-expense")]
+        public async Task<IActionResult> PredictNextMonthExpense([FromBody] CategoryRequest request)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.Category))
+            {
+                return BadRequest(new { message = "The category field is required." });
+            }
+
+            try
+            {
+                var userId = GetUserIdFromToken();
+                if (string.IsNullOrWhiteSpace(userId))
+                {
+                    return Unauthorized(new { message = "User is not authorized." });
+                }
+
+                Console.WriteLine($"Received category: {request.Category}");
+
+                // Call the async method to predict the expense
+                var predictedAmount = await _mlHelper.PredictNextMonthExpenseForCategoryAsync(request.Category, userId);
+
+                Console.WriteLine($"Predicted amount: {predictedAmount}");
+
+                return Ok(new { predictedAmount });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in PredictNextMonthExpense: {ex.Message}");
+                return StatusCode(500);
+            }
         }
 
+
+
+
+
         // Nested classes for request bodies
-       
+
         public class QueryDetails
         {
             public string From { get; set; }
@@ -387,6 +385,10 @@ namespace FinanceTracker.API.Controllers
             public decimal Amount { get; set; }
         }
 
+        public class CategoryRequest
+        {
+            public string Category { get; set; }
+        }
         public class RateInfo
         {
             public decimal Rate { get; set; }
@@ -400,7 +402,10 @@ namespace FinanceTracker.API.Controllers
 
         public class PredictionRequest
         {
-            public string Description { get; set; }
+            public string Description { get; set; } // Already exists
+            //public string Category { get; set; } // For predicting the next month's expense for a specific category
+            //public string UserId { get; set; } // Add this property
         }
+
     }
 }
