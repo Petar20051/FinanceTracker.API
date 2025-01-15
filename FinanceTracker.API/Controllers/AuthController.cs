@@ -1,4 +1,5 @@
 ﻿using FinanceTracker.API.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -57,6 +58,51 @@ namespace FinanceTracker.API.Controllers
             var userid = user.Id;
             return Ok(new { Token = token, userId = userid });
         }
+        [HttpGet("details")]
+       
+        public async Task<IActionResult> GetProfileDetails()
+        {
+            var userId = GetUserIdFromToken();
+            var user = await _userManager.FindByIdAsync(userId);
+
+            if (user == null)
+                return NotFound("User not found");
+
+            var profileDetails = new UpdateProfileDto
+            {
+                FullName = user.FullName,
+                DateOfBirth = user.DateOfBirth,
+                TotalIncome = user.TotalIncome
+            };
+
+            return Ok(profileDetails);
+        }
+
+        [HttpPut("update")]
+       
+        public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileDto model)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var userId = GetUserIdFromToken();
+            var user = await _userManager.FindByIdAsync(userId);
+
+            if (user == null)
+                return NotFound("User not found");
+
+            // Update the user's profile fields
+            user.FullName = model.FullName;
+            user.DateOfBirth = model.DateOfBirth;
+            user.TotalIncome = model.TotalIncome;
+
+            var result = await _userManager.UpdateAsync(user);
+
+            if (!result.Succeeded)
+                return BadRequest(result.Errors);
+
+            return Ok("Profile updated successfully");
+        }
 
         private string GenerateJwtToken(ApplicationUser user)
         {
@@ -77,6 +123,16 @@ namespace FinanceTracker.API.Controllers
                 signingCredentials: creds);
 
             return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        private string GetUserIdFromToken()
+        {
+            var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+            if (string.IsNullOrEmpty(token)) return null;
+
+            var handler = new JwtSecurityTokenHandler();
+            var jsonToken = handler.ReadToken(token) as JwtSecurityToken;
+            return jsonToken?.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
         }
     }
 }
