@@ -23,13 +23,15 @@ namespace FinanceTracker.API.Controllers
         private readonly BankingService _bankingService;
         private readonly CurrencyExchangeService _currencyExchangeService;
         private readonly HttpClient _httpClient;
+        private readonly SaltEdgeService _saltEdgeService;
 
         public ExpenseController(
             FinanceTrackerDbContext context,
             NotificationService notificationService,
             CurrencyExchangeService currencyExchangeService,
             BankingService bankingService,
-            HttpClient httpClient)
+            HttpClient httpClient,
+            SaltEdgeService saltEdgeService)
         {
             _context = context;
             _notificationService = notificationService;
@@ -37,6 +39,7 @@ namespace FinanceTracker.API.Controllers
             _currencyExchangeService = currencyExchangeService;
             _bankingService = bankingService;
             _httpClient = httpClient;
+            _saltEdgeService = saltEdgeService;
         }
 
         private string GetUserIdFromToken()
@@ -275,26 +278,50 @@ namespace FinanceTracker.API.Controllers
             var userId = GetUserIdFromToken();
             if (userId == null) return Unauthorized();
 
-            var transactions = await _bankingService.GetTransactions(request.UserToken);
-
-            foreach (var transaction in transactions)
+            try
             {
-                var expense = new Expense
+                // Fetch transactions using Salt Edge
+                var transactions = await _bankingService.GetTransactions(request.UserToken);
+
+                foreach (var transaction in transactions)
                 {
-                    UserId = userId,
-                    Description = transaction.Description,
-                    Category = transaction.Category,
-                    Amount = transaction.Amount,
-                    Date = transaction.Date
-                };
+                    var expense = new Expense
+                    {
+                        UserId = userId,
+                        Description = transaction.Description,
+                        Category = transaction.Category,
+                        Amount = transaction.Amount,
+                        Date = transaction.Date
+                    };
 
-                _context.Expenses.Add(expense);
+                    _context.Expenses.Add(expense);
+                }
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new { Message = "Transactions synced successfully." });
             }
-
-            await _context.SaveChangesAsync();
-
-            return Ok(new { Message = "Transactions synced successfully." });
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Message = $"Error syncing transactions: {ex.Message}" });
+            }
         }
+        [HttpGet("initiate-connect")]
+        public async Task<IActionResult> InitiateConnect()
+        {
+            try
+            {
+                var connectUrl = await _saltEdgeService.GenerateConnectUrlAsync();
+                return Ok(new { connectUrl });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error generating Salt Edge Connect URL: {ex.Message}");
+                return StatusCode(500, new { message = ex.Message });
+            }
+        }
+
+
 
         [HttpPost("predict-category")]
         public IActionResult PredictCategory([FromBody] PredictionRequest request)

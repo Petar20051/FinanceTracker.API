@@ -58,6 +58,7 @@ builder.Services.AddScoped<NotificationService>();
 builder.Services.AddHostedService<MonthlySummaryService>();
 builder.Services.AddSingleton<CurrencyExchangeService>();
 builder.Services.AddHttpClient<BankingService>();
+builder.Services.AddHttpClient<SaltEdgeService>();
 
 var app = builder.Build();
 
