@@ -271,10 +271,14 @@ namespace FinanceTracker.API.Controllers
 
 
 
-        // Sync transactions
         [HttpPost("sync-transactions")]
         public async Task<IActionResult> SyncTransactions([FromBody] SyncRequest request)
         {
+            if (request == null || string.IsNullOrWhiteSpace(request.UserToken))
+            {
+                return BadRequest(new { Message = "Connection ID must be provided to sync transactions." });
+            }
+
             var userId = GetUserIdFromToken();
             if (userId == null) return Unauthorized();
 
@@ -285,16 +289,20 @@ namespace FinanceTracker.API.Controllers
 
                 foreach (var transaction in transactions)
                 {
-                    var expense = new Expense
+                    // Check for existing transactions to avoid duplicates
+                    if (!_context.Expenses.Any(e => e.UserId == userId && e.Description == transaction.Description && e.Date == transaction.Date && e.Amount == transaction.Amount))
                     {
-                        UserId = userId,
-                        Description = transaction.Description,
-                        Category = transaction.Category,
-                        Amount = transaction.Amount,
-                        Date = transaction.Date
-                    };
+                        var expense = new Expense
+                        {
+                            UserId = userId,
+                            Description = transaction.Description,
+                            Category = transaction.Category,
+                            Amount = transaction.Amount,
+                            Date = transaction.Date
+                        };
 
-                    _context.Expenses.Add(expense);
+                        _context.Expenses.Add(expense);
+                    }
                 }
 
                 await _context.SaveChangesAsync();
@@ -303,9 +311,13 @@ namespace FinanceTracker.API.Controllers
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"Error syncing transactions: {ex.Message}");
                 return StatusCode(500, new { Message = $"Error syncing transactions: {ex.Message}" });
             }
         }
+
+
+
         [HttpGet("initiate-connect")]
         public async Task<IActionResult> InitiateConnect()
         {

@@ -1,5 +1,6 @@
 ﻿using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
 using Newtonsoft.Json;
 
 namespace FinanceTracker.API.Banking
@@ -7,63 +8,84 @@ namespace FinanceTracker.API.Banking
     public class BankingService
     {
         private readonly HttpClient _httpClient;
+        private readonly IConfiguration _configuration;
 
-        public BankingService(HttpClient httpClient)
+        public BankingService(HttpClient httpClient, IConfiguration configuration)
         {
             _httpClient = httpClient;
+            _configuration = configuration;
         }
 
-        public async Task<List<Transaction>> GetTransactions(string userToken)
+        public async Task<List<Transaction>> GetTransactions(string connectionId)
         {
-            const string endpoint = "https://www.saltedge.com/api/v5/transactions";
+            const string endpoint = "https://www.saltedge.com/api/v6/transactions";
+            var appId = _configuration["SaltEdge:ClientID"];
+            var appSecret = _configuration["SaltEdge:AppSecret"];
 
-            // Add required headers for Salt Edge API
-            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", userToken);
-            _httpClient.DefaultRequestHeaders.Add("Client-ID", "YOUR_CLIENT_ID");
-            _httpClient.DefaultRequestHeaders.Add("App-Secret", "YOUR_APP_SECRET");
+            // Clear and set headers
+            _httpClient.DefaultRequestHeaders.Clear();
+            _httpClient.DefaultRequestHeaders.Add("App-Id", appId);
+            _httpClient.DefaultRequestHeaders.Add("Secret", appSecret);
 
-            // Make the API request
-            var response = await _httpClient.GetAsync(endpoint);
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                var errorContent = await response.Content.ReadAsStringAsync();
-                throw new Exception($"Salt Edge API error: {response.StatusCode} - {errorContent}");
+                // Add query parameters if required (e.g., filtering)
+                var requestUrl = $"{endpoint}?connection_id={connectionId}";
+
+                // Send GET request to fetch transactions
+                var response = await _httpClient.GetAsync(requestUrl);
+
+                // Handle non-success status codes
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Salt Edge API error: {response.StatusCode} - {errorContent}");
+                    throw new Exception($"Salt Edge API error: {response.StatusCode} - {errorContent}");
+                }
+
+                // Deserialize the response
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<SaltEdgeTransactionResponse>(responseContent);
+
+                // Map the transactions to your application's model
+                return result.Data.Select(transaction => new Transaction
+                {
+                    Description = transaction.Description,
+                    Category = transaction.Category,
+                    Amount = transaction.Amount,
+                    Date = transaction.MadeOn
+                }).ToList();
             }
-
-            var content = await response.Content.ReadAsStringAsync();
-            var result = JsonConvert.DeserializeObject<SaltEdgeTransactionResponse>(content);
-
-            // Map transactions to your application's model
-            return result.Data.Select(transaction => new Transaction
+            catch (Exception ex)
             {
-                Description = transaction.Description,
-                Category = transaction.Category,
-                Amount = transaction.Amount,
-                Date = transaction.MadeOn
-            }).ToList();
+                Console.WriteLine($"Error fetching transactions: {ex.Message}");
+                throw;
+            }
         }
-    }
 
-    // Salt Edge API response format
-    public class SaltEdgeTransactionResponse
-    {
-        public List<SaltEdgeTransaction> Data { get; set; }
-    }
+        // Response format from Salt Edge
+        public class SaltEdgeTransactionResponse
+        {
+            public List<SaltEdgeTransaction> Data { get; set; }
+        }
 
-    public class SaltEdgeTransaction
-    {
-        public string Description { get; set; }
-        public string Category { get; set; }
-        public decimal Amount { get; set; }
-        public DateTime MadeOn { get; set; }
-    }
+        // Individual transaction from Salt Edge
+        public class SaltEdgeTransaction
+        {
+            public string Description { get; set; }
+            public string Category { get; set; }
+            public decimal Amount { get; set; }
+            [JsonProperty("made_on")]
+            public DateTime MadeOn { get; set; }
+        }
 
-    // Your application's transaction model
-    public class Transaction
-    {
-        public string Description { get; set; }
-        public string Category { get; set; }
-        public decimal Amount { get; set; }
-        public DateTime Date { get; set; }
+        // Internal application transaction model
+        public class Transaction
+        {
+            public string Description { get; set; }
+            public string Category { get; set; }
+            public decimal Amount { get; set; }
+            public DateTime Date { get; set; }
+        }
     }
 }

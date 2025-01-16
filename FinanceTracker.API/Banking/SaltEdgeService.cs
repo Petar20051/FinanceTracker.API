@@ -6,15 +6,17 @@ namespace FinanceTracker.API.Banking
     public class SaltEdgeService
     {
         private readonly HttpClient _httpClient;
+        private readonly IConfiguration _configuration;
 
-        public SaltEdgeService(HttpClient httpClient)
+        public SaltEdgeService(HttpClient httpClient, IConfiguration configuration)
         {
             _httpClient = httpClient;
+            _configuration = configuration;
         }
 
         public async Task<string> GenerateConnectUrlAsync()
         {
-            const string endpoint = "https://www.saltedge.com/api/v5/connect_sessions/create";
+            const string endpoint = "https://www.saltedge.com/api/v6/connections/connect";
 
             // Prepare the request body
             var requestBody = new
@@ -22,15 +24,16 @@ namespace FinanceTracker.API.Banking
                 data = new
                 {
                     customer_id = "1454943464931203074", // Replace with a valid customer ID
-                    return_to = "http://localhost:3000/dashboard", // Redirect after linking
+                    attempt = new
+                    {
+                        return_to = "http://localhost:3000/dashboard" // Redirect after linking
+                    },
                     consent = new
                     {
-                        scopes = new[] { "account_details", "transactions", "balance" } // Valid scopes
+                        scopes = new[] { "holder_info", "accounts", "transactions" } // Updated scopes for API v6
                     }
                 }
             };
-
-
 
             var content = new StringContent(JsonConvert.SerializeObject(requestBody), Encoding.UTF8, "application/json");
 
@@ -38,17 +41,19 @@ namespace FinanceTracker.API.Banking
             _httpClient.DefaultRequestHeaders.Clear();
 
             // Add the required headers
-            _httpClient.DefaultRequestHeaders.Add("App-Id", "Y9SCdCcgvs0zE82XP9Mk3NWTELQ_SOd58NiwkZWSTh0");
-            _httpClient.DefaultRequestHeaders.Add("Secret", "iJjo6GqFjcx60EO7Bv64g_pnC5k4MaXo9grfopvhTX4");
+            var appId = _configuration["SaltEdge:ClientID"];
+            var appSecret = _configuration["SaltEdge:AppSecret"];
+
+            if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(appSecret))
+            {
+                throw new Exception("Salt Edge App ID or Secret is not configured.");
+            }
+
+            _httpClient.DefaultRequestHeaders.Add("App-Id", appId);
+            _httpClient.DefaultRequestHeaders.Add("Secret", appSecret);
 
             try
             {
-                // Log headers for debugging
-                foreach (var header in _httpClient.DefaultRequestHeaders)
-                {
-                    Console.WriteLine($"Header: {header.Key} = {string.Join(", ", header.Value)}");
-                }
-
                 var response = await _httpClient.PostAsync(endpoint, content);
 
                 // Check if the response is successful
@@ -70,5 +75,6 @@ namespace FinanceTracker.API.Banking
                 throw;
             }
         }
-    }
+    
+}
 }
