@@ -184,55 +184,91 @@ namespace FinanceTracker.API.Controllers
             return NoContent();
         }
 
-       
+
         [HttpGet("report/category-summary")]
         public async Task<IActionResult> GetCategorySummary(
-            [FromQuery] DateTime? startDate,
-            [FromQuery] DateTime? endDate)
+     [FromQuery] DateTime? startDate,
+     [FromQuery] DateTime? endDate)
         {
             var userId = GetUserIdFromToken();
-            if (userId == null) return Unauthorized();
+            if (userId == null)
+                return Unauthorized(new { Message = "User not authenticated." });
 
-            var query = _context.Expenses.Where(e => e.UserId == userId);
+            try
+            {
+                // Fetch user-specific expenses
+                var query = _context.Expenses.Where(e => e.UserId == userId);
 
-            if (startDate.HasValue) query = query.Where(e => e.Date >= startDate.Value);
-            if (endDate.HasValue) query = query.Where(e => e.Date <= endDate.Value);
+                // Apply date filters if provided
+                if (startDate.HasValue)
+                    query = query.Where(e => e.Date >= startDate.Value);
 
-            var categorySummary = await query
-                .GroupBy(e => e.Category)
-                .Select(g => new
-                {
-                    Category = g.Key,
-                    TotalAmount = g.Sum(e => e.Amount)
-                })
-                .ToListAsync();
+                if (endDate.HasValue)
+                    query = query.Where(e => e.Date <= endDate.Value);
 
-            return Ok(categorySummary);
+                // Group by category and calculate total amount
+                var categorySummary = await query
+                    .GroupBy(e => e.Category)
+                    .Select(g => new
+                    {
+                        Category = g.Key,
+                        TotalAmount = g.Sum(e => e.Amount)
+                    })
+                    .ToListAsync();
+
+                return Ok(categorySummary);
+            }
+            catch (Exception ex)
+            {
+                // Log the error for debugging
+                Console.Error.WriteLine($"Error in GetCategorySummary: {ex.Message}");
+                return StatusCode(500, new { Message = "An error occurred while processing your request." });
+            }
         }
 
-        // Fetch monthly trends
+
         [HttpGet("report/monthly-trends")]
-        public async Task<IActionResult> GetMonthlyTrends()
+        public async Task<IActionResult> GetMonthlyExpenseTrends()
         {
+            Console.WriteLine("GetMonthlyExpenseTrends called");
+
             var userId = GetUserIdFromToken();
-            if (userId == null) return Unauthorized();
+            if (userId == null)
+                return Unauthorized(new { Message = "User not authenticated." });
 
-            var trends = await _context.Expenses
-                .Where(e => e.UserId == userId)
-                .GroupBy(e => new { e.Date.Year, e.Date.Month })
-                .Select(g => new
+            try
+            {
+                var trends = await _context.Expenses
+                    .Where(e => e.UserId == userId && e.Date != null)
+                    .GroupBy(e => new { e.Date.Year, e.Date.Month })
+                    .Select(g => new
+                    {
+                        Year = g.Key.Year,
+                        Month = g.Key.Month,
+                        Amount = g.Sum(e => e.Amount)
+                    })
+                    .OrderBy(g => g.Year)
+                    .ThenBy(g => g.Month)
+                    .ToListAsync();
+
+                return Ok(trends.Select(t => new
                 {
-                    Year = g.Key.Year,
-                    Month = g.Key.Month,
-                    TotalAmount = g.Sum(e => e.Amount)
-                })
-                .OrderBy(g => g.Year).ThenBy(g => g.Month)
-                .ToListAsync();
-
-            return Ok(trends);
+                    Month = $"{t.Year}-{t.Month:00}",
+                    Amount = t.Amount
+                }));
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error in GetMonthlyExpenseTrends: {ex.Message}");
+                return StatusCode(500, new { Message = "An error occurred while processing your request." });
+            }
         }
 
-       
+
+
+
+
+
         [HttpPost("convert")]
         public async Task<IActionResult> ConvertCurrency([FromBody] ConversionRequest request)
         {
