@@ -107,39 +107,50 @@ namespace FinanceTracker.API.Controllers
             if (userId == null)
                 return Unauthorized(new { Message = "User not authenticated." });
 
-            var expenses = await _context.Expenses
-     .Where(e => e.UserId == userId)
-     .GroupBy(e => e.Category)
-     .Select(g => new PredictionData
-     {
-         Category = g.Key,
-         TotalAmount = (float)g.Sum(e => e.Amount),
-         IsRecurring = g.Count() > 3 ? 1.0f : 0.0f 
-     })
-     .ToListAsync();
-
-
-            var goalHelper = new GoalSuggestionHelper();
-            var model = goalHelper.TrainGoalSuggestionModel(expenses);
-
-            var futureData = expenses.Select(e => new PredictionData
+            try
             {
-                Category = e.Category,
-                TotalAmount = e.TotalAmount * 1.1f,
-                IsRecurring = e.IsRecurring
-            });
+                var expenses = await _context.Expenses
+                    .Where(e => e.UserId == userId)
+                    .GroupBy(e => e.Category)
+                    .Select(g => new PredictionData
+                    {
+                        Category = g.Key,
+                        TotalAmount = (float)g.Sum(e => e.Amount),
+                        IsRecurring = g.Count() > 3 ? 1.0f : 0.0f
+                    })
+                    .ToListAsync();
 
-            var predictedCategories = goalHelper.PredictGoalCategories(model, futureData);
+                if (!expenses.Any())
+                    return Ok(new List<Goal>()); // Return an empty array
 
-            var suggestedGoals = predictedCategories.Select(category => new
+                var goalHelper = new GoalSuggestionHelper();
+                var model = goalHelper.TrainGoalSuggestionModel(expenses);
+
+                var futureData = expenses.FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.Category));
+                if (futureData == null)
+                    return Ok(new List<Goal>()); // Return an empty array
+
+                var predictedCategory = goalHelper.PredictGoalCategory(model, futureData);
+
+                var suggestedGoal = new Goal
+                {
+                    Title = $"Save for {predictedCategory} expenses",
+                    Category = predictedCategory,
+                    TargetAmount = (decimal)(futureData.TotalAmount * 1.2f),
+                    Deadline = DateTime.UtcNow.AddMonths(6)
+                };
+
+                // Return an array with a single item
+                return Ok(new List<Goal> { suggestedGoal });
+            }
+            catch (Exception ex)
             {
-                Title = $"Save for {category} expenses",
-                Category = category,
-                TargetAmount = expenses.FirstOrDefault(e => e.Category == category)?.TotalAmount * 1.2f ?? 1000,
-                Deadline = DateTime.UtcNow.AddMonths(6)
-            });
-
-            return Ok(suggestedGoals);
+                // Log the error
+                Console.Error.WriteLine($"Error in GetGoalSuggestions: {ex.Message}");
+                return StatusCode(500, new { Message = "An error occurred while processing your request." });
+            }
         }
+
+
     }
 }

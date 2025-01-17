@@ -1,6 +1,7 @@
 ﻿using Microsoft.ML.Data;
 using Microsoft.ML;
 using System.Linq;
+using Microsoft.ML.Trainers;
 
 namespace FinanceTracker.API.ML
 {
@@ -13,21 +14,28 @@ namespace FinanceTracker.API.ML
             _mlContext = new MLContext();
         }
 
-        // Train the Goal Suggestion Model
+        // Updated pipeline for category prediction
         public ITransformer TrainGoalSuggestionModel(IEnumerable<PredictionData> expenseData)
         {
             if (expenseData == null || !expenseData.Any())
                 throw new ArgumentException("Expense data is null or empty.");
 
-            // Validate the input data
             var validData = expenseData.Where(e => !string.IsNullOrWhiteSpace(e.Category)).ToList();
             if (!validData.Any())
                 throw new ArgumentException("No valid data with non-empty categories.");
 
-            // Load data into IDataView
             var dataView = _mlContext.Data.LoadFromEnumerable(validData);
 
-            // Define the ML.NET pipeline
+            // Define options for the SdcaRegressionTrainer
+            var trainerOptions = new SdcaRegressionTrainer.Options
+            {
+                LabelColumnName = nameof(PredictionData.TotalAmount),
+                FeatureColumnName = "Features",
+                MaximumNumberOfIterations = 100,
+                ConvergenceTolerance = 0.001f
+            };
+
+            // Define and build the ML pipeline
             var pipeline = _mlContext.Transforms.Conversion.MapValueToKey(
                     inputColumnName: nameof(PredictionData.Category),
                     outputColumnName: "CategoryKey")
@@ -37,38 +45,35 @@ namespace FinanceTracker.API.ML
                 .Append(_mlContext.Transforms.Concatenate(
                     "Features",
                     "CategoryEncoded",
-                    nameof(PredictionData.TotalAmount),
-                    nameof(PredictionData.IsRecurring)))
-                .Append(_mlContext.Transforms.NormalizeMinMax("Features"))
-                .Append(_mlContext.Regression.Trainers.Sdca(
-                    labelColumnName: nameof(PredictionData.TotalAmount),
-                    featureColumnName: "Features"));
+                    nameof(PredictionData.IsRecurring))) // Keep relevant features for regression
+                .Append(_mlContext.Transforms.NormalizeMinMax("Features")) // Normalize for regression
+                .Append(_mlContext.Regression.Trainers.Sdca(trainerOptions));
 
             // Train the model
             var model = pipeline.Fit(dataView);
 
+
             return model;
         }
 
-        // Predict Goal Categories
-        public IEnumerable<string> PredictGoalCategories(ITransformer model, IEnumerable<PredictionData> futureData)
+        // Updated prediction method
+        public string PredictGoalCategory(ITransformer model, PredictionData futureData)
         {
-            if (futureData == null || !futureData.Any())
+            if (futureData == null)
                 throw new ArgumentException("Future data is null or empty.");
+
+            if (string.IsNullOrWhiteSpace(futureData.Category))
+                throw new ArgumentException("Future data contains a null or empty category.");
 
             // Create a prediction engine
             var predictionEngine = _mlContext.Model.CreatePredictionEngine<PredictionData, GoalPrediction>(model);
 
-            // Predict categories for each data point
-            foreach (var data in futureData)
-            {
-                if (string.IsNullOrWhiteSpace(data.Category))
-                    throw new ArgumentException("Future data contains a null or empty category.");
-
-                var prediction = predictionEngine.Predict(data);
-                yield return prediction.PredictedCategory; // Return the predicted category
-            }
+            // Predict and return the category
+            var prediction = predictionEngine.Predict(futureData);
+            return prediction.PredictedCategory; // Return the predicted category as a string
         }
+
+
     }
 
     // Data structure for training and prediction
