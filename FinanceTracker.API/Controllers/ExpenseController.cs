@@ -196,17 +196,9 @@ namespace FinanceTracker.API.Controllers
 
             try
             {
-                // Fetch user-specific expenses
+               
                 var query = _context.Expenses.Where(e => e.UserId == userId);
 
-                // Apply date filters if provided
-                if (startDate.HasValue)
-                    query = query.Where(e => e.Date >= startDate.Value);
-
-                if (endDate.HasValue)
-                    query = query.Where(e => e.Date <= endDate.Value);
-
-                // Group by category and calculate total amount
                 var categorySummary = await query
                     .GroupBy(e => e.Category)
                     .Select(g => new
@@ -220,7 +212,7 @@ namespace FinanceTracker.API.Controllers
             }
             catch (Exception ex)
             {
-                // Log the error for debugging
+                
                 Console.Error.WriteLine($"Error in GetCategorySummary: {ex.Message}");
                 return StatusCode(500, new { Message = "An error occurred while processing your request." });
             }
@@ -297,7 +289,7 @@ namespace FinanceTracker.API.Controllers
         }
 
 
-        // Nested class for conversion request
+        
         public class ConversionRequest
         {
             public string FromCurrency { get; set; }
@@ -320,12 +312,12 @@ namespace FinanceTracker.API.Controllers
 
             try
             {
-                // Fetch transactions using Salt Edge
+                
                 var transactions = await _bankingService.GetTransactions(request.UserToken);
 
                 foreach (var transaction in transactions)
                 {
-                    // Check for existing transactions to avoid duplicates
+                    
                     if (!_context.Expenses.Any(e => e.UserId == userId && e.Description == transaction.Description && e.Date == transaction.Date && e.Amount == transaction.Amount))
                     {
                         var expense = new Expense
