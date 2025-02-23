@@ -83,11 +83,11 @@ namespace FinanceTracker.API.Controllers
 
 
 
-        // Add a new expense
+        
         [HttpPost]
         public async Task<IActionResult> AddExpense([FromBody] Expense expense)
         {
-            // Validate the incoming model
+            
             if (!ModelState.IsValid)
             {
                 var errors = ModelState.Values
@@ -97,20 +97,32 @@ namespace FinanceTracker.API.Controllers
                 return BadRequest(new { Errors = errors });
             }
 
-            // Extract UserId from the token
+            
             var userId = GetUserIdFromToken();
             if (userId == null)
                 return Unauthorized(new { Message = "User not authenticated." });
 
-            // Assign user ID and default the date if not provided
+            
             expense.UserId = userId;
             expense.Date = expense.Date == DateTime.MinValue ? DateTime.UtcNow : expense.Date;
 
-            // Add the expense to the database
+          
             _context.Expenses.Add(expense);
             await _context.SaveChangesAsync();
 
-            // Budget notifications
+            var budgeta = await _context.Budgets
+       .FirstOrDefaultAsync(b => b.UserId == userId && b.Category.ToLower() == expense.Category.ToLower());
+            if (budgeta != null)
+            {
+                
+                budgeta.Spent = _context.Expenses
+                    .Where(e => e.UserId == userId && e.Category.ToLower() == expense.Category.ToLower())
+                    .Sum(e => e.Amount);
+                _context.Budgets.Update(budgeta);
+                await _context.SaveChangesAsync();
+            }
+
+            
             try
             {
                 var budgets = await _context.Budgets.Where(b => b.UserId == userId).ToListAsync();
@@ -132,7 +144,7 @@ namespace FinanceTracker.API.Controllers
                 Console.WriteLine($"Error in budget notifications: {ex.Message}");
             }
 
-            // Return the created expense
+           
             return CreatedAtAction(nameof(GetExpenses), new { id = expense.Id }, expense);
         }
 
@@ -153,7 +165,7 @@ namespace FinanceTracker.API.Controllers
             if (expense == null)
                 return NotFound(new { Message = "Expense not found." });
 
-            // Update the expense fields
+            
             expense.Category = updatedExpense.Category;
             expense.Amount = updatedExpense.Amount;
             expense.Description = updatedExpense.Description;
@@ -164,11 +176,11 @@ namespace FinanceTracker.API.Controllers
             _context.Expenses.Update(expense);
             await _context.SaveChangesAsync();
 
-            return Ok(expense); // Return the updated expense
+            return Ok(expense); 
         }
 
 
-        // Delete an expense
+        
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteExpense(int id)
         {
@@ -266,7 +278,7 @@ namespace FinanceTracker.API.Controllers
         {
             try
             {
-                // Validate the request to ensure all required fields are provided
+                
                 if (string.IsNullOrWhiteSpace(request.FromCurrency) ||
                     string.IsNullOrWhiteSpace(request.ToCurrency) ||
                     request.Amount <= 0)
@@ -274,15 +286,15 @@ namespace FinanceTracker.API.Controllers
                     return BadRequest(new { Message = "Invalid input. Please provide valid currencies and a positive amount." });
                 }
 
-                // Perform the currency conversion
+                
                 var convertedAmount = await _currencyExchangeService.ConvertCurrency(request.FromCurrency, request.ToCurrency, request.Amount);
 
-                // Return the converted amount in a structured response
+                
                 return Ok(new { ConvertedAmount = convertedAmount });
             }
             catch (Exception ex)
             {
-                // Log the error details for debugging purposes
+                
                 Console.WriteLine($"Error in ConvertCurrency: {ex.Message}");
                 return BadRequest(new { Message = $"Currency conversion failed: {ex.Message}" });
             }
@@ -379,7 +391,7 @@ namespace FinanceTracker.API.Controllers
                     return Unauthorized(new { Message = "User is not authorized." });
                 }
 
-                // Load user-specific expense data
+               
                 var expenseData = _context.Expenses
                     .Where(e => e.UserId == userId)
                     .Select(e => new ExpenseData
@@ -387,7 +399,7 @@ namespace FinanceTracker.API.Controllers
                         Category = e.Category,
                         Description = e.Description,
                         TotalAmount = (float)e.Amount,
-                        UserSpecificWeight = 1.0f // Default weight
+                        UserSpecificWeight = 1.0f 
                     }).ToList();
 
                 if (!expenseData.Any())
@@ -395,7 +407,7 @@ namespace FinanceTracker.API.Controllers
                     return NotFound(new { Message = "No training data available for this user." });
                 }
 
-                // Train the model and predict
+                
                 var model = _mlHelper.TrainCategoryPredictionModel(expenseData);
                 var predictedCategory = _mlHelper.PredictCategory(model, request.Description);
 
@@ -425,7 +437,7 @@ namespace FinanceTracker.API.Controllers
 
                 Console.WriteLine($"Received category: {request.Category}");
 
-                // Call the async method to predict the expense
+               
                 var predictedAmount = await _mlHelper.PredictNextMonthExpenseForCategoryAsync(request.Category, userId);
 
                 Console.WriteLine($"Predicted amount: {predictedAmount}");
@@ -443,7 +455,7 @@ namespace FinanceTracker.API.Controllers
 
 
 
-        // Nested classes for request bodies
+      
 
         public class QueryDetails
         {
@@ -469,9 +481,7 @@ namespace FinanceTracker.API.Controllers
 
         public class PredictionRequest
         {
-            public string Description { get; set; } // Already exists
-            //public string Category { get; set; } // For predicting the next month's expense for a specific category
-            //public string UserId { get; set; } // Add this property
+            public string Description { get; set; }
         }
 
     }

@@ -91,7 +91,7 @@ namespace FinanceTracker.API.Controllers
             if (user == null)
                 return NotFound("User not found");
 
-            // Update the user's profile fields
+            
             user.FullName = model.FullName;
             user.DateOfBirth = model.DateOfBirth;
             user.TotalIncome = model.TotalIncome;

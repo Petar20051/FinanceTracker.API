@@ -22,20 +22,20 @@ namespace FinanceTracker.API.Banking
             var appId = _configuration["SaltEdge:ClientID"];
             var appSecret = _configuration["SaltEdge:AppSecret"];
 
-            // Clear and set headers
+           
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.Add("App-Id", appId);
             _httpClient.DefaultRequestHeaders.Add("Secret", appSecret);
 
             try
             {
-                // Add query parameters if required (e.g., filtering)
+               
                 var requestUrl = $"{endpoint}?connection_id={connectionId}";
 
-                // Send GET request to fetch transactions
+              
                 var response = await _httpClient.GetAsync(requestUrl);
 
-                // Handle non-success status codes
+                
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();
@@ -43,11 +43,11 @@ namespace FinanceTracker.API.Banking
                     throw new Exception($"Salt Edge API error: {response.StatusCode} - {errorContent}");
                 }
 
-                // Deserialize the response
+               
                 var responseContent = await response.Content.ReadAsStringAsync();
                 var result = JsonConvert.DeserializeObject<SaltEdgeTransactionResponse>(responseContent);
 
-                // Map the transactions to your application's model
+                
                 return result.Data.Select(transaction => new Transaction
                 {
                     Description = transaction.Description,
@@ -63,13 +63,12 @@ namespace FinanceTracker.API.Banking
             }
         }
 
-        // Response format from Salt Edge
         public class SaltEdgeTransactionResponse
         {
             public List<SaltEdgeTransaction> Data { get; set; }
         }
 
-        // Individual transaction from Salt Edge
+       
         public class SaltEdgeTransaction
         {
             public string Description { get; set; }
@@ -79,7 +78,7 @@ namespace FinanceTracker.API.Banking
             public DateTime MadeOn { get; set; }
         }
 
-        // Internal application transaction model
+        
         public class Transaction
         {
             public string Description { get; set; }

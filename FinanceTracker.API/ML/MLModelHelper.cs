@@ -18,7 +18,7 @@ namespace FinanceTracker.API.ML
             _context = financeTrackerDbContext ?? throw new ArgumentNullException(nameof(financeTrackerDbContext));
         }
 
-        // Prepares historical data for training
+      
         public async Task<List<ExpenseData>> PrepareHistoricalData(string userId)
         {
             var expenses = await _context.Expenses
@@ -45,8 +45,8 @@ namespace FinanceTracker.API.ML
         {
             var holidays = new List<DateTime>
             {
-                new DateTime(date.Year, 12, 25), // Christmas
-                new DateTime(date.Year, 1, 1)   // New Year
+                new DateTime(date.Year, 12, 25), 
+                new DateTime(date.Year, 1, 1)   
             };
 
             return holidays.Any(h => h.Month == date.Month && h.Day == date.Day);
@@ -124,14 +124,14 @@ namespace FinanceTracker.API.ML
         {
             try
             {
-                // Validate inputs
+               
                 if (string.IsNullOrWhiteSpace(category))
                     throw new ArgumentException("Category cannot be null or empty.", nameof(category));
 
                 if (string.IsNullOrWhiteSpace(userId))
                     throw new ArgumentException("UserId cannot be null or empty.", nameof(userId));
 
-                // Fetch and group historical data
+               
                 var historicalData = await _context.Expenses
                     .AsNoTracking()
                     .Where(e => e.UserId == userId && e.Category == category)
@@ -149,11 +149,11 @@ namespace FinanceTracker.API.ML
 
                 Console.WriteLine($"Fetched {historicalData.Count} historical data records for category: {category}.");
 
-                // Load data into ML.NET IDataView
+                
                 var dataView = _mlContext.Data.LoadFromEnumerable(historicalData);
                 Console.WriteLine("DataView successfully created.");
 
-                // Define the regression trainer options
+                
                 var trainerOptions = new SdcaRegressionTrainer.Options
                 {
                     LabelColumnName = nameof(MonthlyExpenseData.TotalAmount),
@@ -162,7 +162,7 @@ namespace FinanceTracker.API.ML
                     ConvergenceTolerance = 0.001f
                 };
 
-                // Define and build the ML pipeline
+                
                 var pipeline = _mlContext.Transforms.Conversion.ConvertType(outputColumnName: "YearFloat", inputColumnName: nameof(MonthlyExpenseData.Year), outputKind: DataKind.Single)
                     .Append(_mlContext.Transforms.Conversion.ConvertType(outputColumnName: "MonthFloat", inputColumnName: nameof(MonthlyExpenseData.Month), outputKind: DataKind.Single))
                     .Append(_mlContext.Transforms.Concatenate("Features", "YearFloat", "MonthFloat"))
@@ -172,23 +172,23 @@ namespace FinanceTracker.API.ML
 
                 var startTime = DateTime.UtcNow;
 
-                // Train the model
+              
                 var model = pipeline.Fit(dataView);
 
                 var endTime = DateTime.UtcNow;
                 Console.WriteLine($"Pipeline training completed in {(endTime - startTime).TotalSeconds} seconds.");
 
-                // Save the model
+                
                 const string modelPath = "model.zip";
                 _mlContext.Model.Save(model, dataView.Schema, modelPath);
                 Console.WriteLine($"Model saved to {modelPath}.");
 
-                // Prepare the next month's data for prediction
+                
                 var lastData = historicalData.OrderByDescending(h => h.Year).ThenByDescending(h => h.Month).First();
                 var nextMonth = lastData.Month == 12 ? 1 : lastData.Month + 1;
                 var nextYear = lastData.Month == 12 ? lastData.Year + 1 : lastData.Year;
 
-                // Load the model and make predictions
+                
                 var loadedModel = _mlContext.Model.Load(modelPath, out _);
                 var predictionEngine = _mlContext.Model.CreatePredictionEngine<MonthlyExpenseData, MonthlyExpensePrediction>(loadedModel);
 

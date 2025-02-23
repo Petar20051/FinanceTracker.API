@@ -24,7 +24,7 @@ namespace FinanceTracker.API.Controllers
             _notificationService = notificationService;
         }
 
-        // Helper method to extract UserId from JWT token
+        
         private string GetUserIdFromToken()
         {
             var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
@@ -46,7 +46,7 @@ namespace FinanceTracker.API.Controllers
                 .Where(b => b.UserId == userId)
                 .Select(b => new
                 {
-                    b.Id, // Include ID
+                    b.Id,
                     b.Category,
                     b.Limit,
                     b.Spent
@@ -67,11 +67,11 @@ namespace FinanceTracker.API.Controllers
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var userId = GetUserIdFromToken(); // Extract UserId from the token
+            var userId = GetUserIdFromToken(); 
             if (userId == null)
                 return Unauthorized(new { Message = "User not authenticated." });
 
-            budget.UserId = userId; // Set UserId from the token
+            budget.UserId = userId; 
 
             _context.Budgets.Add(budget);
             await _context.SaveChangesAsync();
@@ -82,7 +82,7 @@ namespace FinanceTracker.API.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateBudget(int id, [FromBody] Budget updatedBudget)
         {
-            var userId = GetUserIdFromToken(); // Extract UserId from the token
+            var userId = GetUserIdFromToken(); 
             if (userId == null)
                 return Unauthorized(new { Message = "User not authenticated." });
 
@@ -103,7 +103,7 @@ namespace FinanceTracker.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteBudget(int id)
         {
-            var userId = GetUserIdFromToken(); // Extract UserId from the token
+            var userId = GetUserIdFromToken(); 
             if (userId == null)
                 return Unauthorized(new { Message = "User not authenticated." });
 
@@ -155,7 +155,7 @@ namespace FinanceTracker.API.Controllers
         [HttpGet("report/budget-summary")]
         public async Task<IActionResult> GetBudgetSummary()
         {
-            var userId = GetUserIdFromToken(); // Extract UserId from the token
+            var userId = GetUserIdFromToken(); 
             if (userId == null)
                 return Unauthorized(new { Message = "User not authenticated." });
 
@@ -176,7 +176,7 @@ namespace FinanceTracker.API.Controllers
         [HttpGet("report/budget-performance")]
         public async Task<IActionResult> GetBudgetPerformance()
         {
-            var userId = GetUserIdFromToken(); // Extract UserId from the token
+            var userId = GetUserIdFromToken();
             if (userId == null)
                 return Unauthorized(new { Message = "User not authenticated." });
 

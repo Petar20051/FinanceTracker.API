@@ -2,9 +2,17 @@
 using Microsoft.ML;
 using System.Linq;
 using Microsoft.ML.Trainers;
+using System.Collections.Generic;
+using System;
 
 namespace FinanceTracker.API.ML
 {
+    public class GoalSuggestionModel
+    {
+        public ITransformer Model { get; set; }
+        public Dictionary<string, float> CategoryAverages { get; set; }
+    }
+
     public class GoalSuggestionHelper
     {
         private readonly MLContext _mlContext;
@@ -14,8 +22,7 @@ namespace FinanceTracker.API.ML
             _mlContext = new MLContext();
         }
 
-        // Updated pipeline for category prediction
-        public ITransformer TrainGoalSuggestionModel(IEnumerable<PredictionData> expenseData)
+        public GoalSuggestionModel TrainGoalSuggestionModel(IEnumerable<PredictionData> expenseData)
         {
             if (expenseData == null || !expenseData.Any())
                 throw new ArgumentException("Expense data is null or empty.");
@@ -24,9 +31,13 @@ namespace FinanceTracker.API.ML
             if (!validData.Any())
                 throw new ArgumentException("No valid data with non-empty categories.");
 
+            
+            var categoryAverages = validData
+                .GroupBy(e => e.Category.ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.Average(x => x.TotalAmount));
+
             var dataView = _mlContext.Data.LoadFromEnumerable(validData);
 
-            // Define options for the SdcaRegressionTrainer
             var trainerOptions = new SdcaRegressionTrainer.Options
             {
                 LabelColumnName = nameof(PredictionData.TotalAmount),
@@ -35,7 +46,6 @@ namespace FinanceTracker.API.ML
                 ConvergenceTolerance = 0.001f
             };
 
-            // Define and build the ML pipeline
             var pipeline = _mlContext.Transforms.Conversion.MapValueToKey(
                     inputColumnName: nameof(PredictionData.Category),
                     outputColumnName: "CategoryKey")
@@ -45,49 +55,64 @@ namespace FinanceTracker.API.ML
                 .Append(_mlContext.Transforms.Concatenate(
                     "Features",
                     "CategoryEncoded",
-                    nameof(PredictionData.IsRecurring))) // Keep relevant features for regression
-                .Append(_mlContext.Transforms.NormalizeMinMax("Features")) // Normalize for regression
+                    nameof(PredictionData.IsRecurring)))
+                .Append(_mlContext.Transforms.NormalizeMinMax("Features"))
                 .Append(_mlContext.Regression.Trainers.Sdca(trainerOptions));
 
-            // Train the model
             var model = pipeline.Fit(dataView);
 
-
-            return model;
+            return new GoalSuggestionModel
+            {
+                Model = model,
+                CategoryAverages = categoryAverages
+            };
         }
 
-        // Updated prediction method
-        public string PredictGoalCategory(ITransformer model, PredictionData futureData)
+        public string PredictGoalCategory(GoalSuggestionModel goalModel, PredictionData futureData)
         {
             if (futureData == null)
-                throw new ArgumentException("Future data is null or empty.");
+                throw new ArgumentException("Future data is null.");
 
             if (string.IsNullOrWhiteSpace(futureData.Category))
                 throw new ArgumentException("Future data contains a null or empty category.");
 
-            // Create a prediction engine
-            var predictionEngine = _mlContext.Model.CreatePredictionEngine<PredictionData, GoalPrediction>(model);
+            var predictionEngine = _mlContext.Model.CreatePredictionEngine<PredictionData, RegressionPrediction>(goalModel.Model);
 
-            // Predict and return the category
             var prediction = predictionEngine.Predict(futureData);
-            return prediction.PredictedCategory; // Return the predicted category as a string
+
+            string predictedCategory = MapScoreToCategory(prediction.Score, goalModel.CategoryAverages);
+
+            return predictedCategory;
         }
 
+        private string MapScoreToCategory(float predictedScore, Dictionary<string, float> categoryAverages)
+        {
+            string closestCategory = null;
+            float smallestDiff = float.MaxValue;
 
+            foreach (var kvp in categoryAverages)
+            {
+                float diff = Math.Abs(predictedScore - kvp.Value);
+                if (diff < smallestDiff)
+                {
+                    smallestDiff = diff;
+                    closestCategory = kvp.Key;
+                }
+            }
+
+            return char.ToUpper(closestCategory[0]) + closestCategory.Substring(1);
+        }
     }
 
-    // Data structure for training and prediction
     public class PredictionData
     {
         public string Category { get; set; }
         public float TotalAmount { get; set; }
-        public float IsRecurring { get; set; } // Changed from bool to float for compatibility
+        public float IsRecurring { get; set; }
     }
 
-    // Prediction output structure
-    public class GoalPrediction
+    public class RegressionPrediction
     {
-        public float Score { get; set; } // Regression score (predicted value)
-        public string PredictedCategory { get; set; } // Predicted category name
+        public float Score { get; set; }
     }
 }

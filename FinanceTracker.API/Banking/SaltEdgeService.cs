@@ -18,29 +18,28 @@ namespace FinanceTracker.API.Banking
         {
             const string endpoint = "https://www.saltedge.com/api/v6/connections/connect";
 
-            // Prepare the request body
+           
             var requestBody = new
             {
                 data = new
                 {
-                    customer_id = "1454943464931203074", // Replace with a valid customer ID
+                    customer_id = "1454943464931203074", 
                     attempt = new
                     {
-                        return_to = "http://localhost:3000/dashboard" // Redirect after linking
+                        return_to = "http://localhost:3000/dashboard" 
                     },
                     consent = new
                     {
-                        scopes = new[] { "holder_info", "accounts", "transactions" } // Updated scopes for API v6
+                        scopes = new[] { "holder_info", "accounts", "transactions" } 
                     }
                 }
             };
 
             var content = new StringContent(JsonConvert.SerializeObject(requestBody), Encoding.UTF8, "application/json");
 
-            // Clear any existing headers to avoid conflicts
+           
             _httpClient.DefaultRequestHeaders.Clear();
 
-            // Add the required headers
             var appId = _configuration["SaltEdge:ClientID"];
             var appSecret = _configuration["SaltEdge:AppSecret"];
 
@@ -56,7 +55,7 @@ namespace FinanceTracker.API.Banking
             {
                 var response = await _httpClient.PostAsync(endpoint, content);
 
-                // Check if the response is successful
+                
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();

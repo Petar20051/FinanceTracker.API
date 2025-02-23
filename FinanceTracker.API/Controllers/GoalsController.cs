@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 namespace FinanceTracker.API.Controllers
 {
-    //[Authorize]
+   
     [ApiController]
     [Route("api/[controller]")]
     public class GoalsController : ControllerBase
@@ -23,7 +23,7 @@ namespace FinanceTracker.API.Controllers
             _context = context;
         }
 
-        // Helper method to extract UserId from JWT token
+      
         private string GetUserIdFromToken()
         {
             var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
@@ -33,7 +33,6 @@ namespace FinanceTracker.API.Controllers
             var jsonToken = handler.ReadToken(token) as JwtSecurityToken;
             return jsonToken?.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
         }
-
         [HttpGet]
         public async Task<IActionResult> GetGoals()
         {
@@ -41,9 +40,30 @@ namespace FinanceTracker.API.Controllers
             if (userId == null)
                 return Unauthorized(new { Message = "User not authenticated." });
 
-            var goals = await _context.Goals.Where(g => g.UserId == userId).ToListAsync();
+            var now = DateTime.UtcNow;
+            var goals = await _context.Goals
+                .Where(g => g.UserId == userId && g.Deadline >= now.AddDays(-3)) 
+                .Select(g => new {
+                    g.Id,
+                    g.Title,
+                    g.Category,
+                    g.TargetAmount,
+                    g.Deadline,
+                    Progress = _context.Expenses
+                        .Where(e => e.UserId == userId
+                                    && e.Category.ToLower() == g.Category.ToLower()
+                                    && e.Date >= now
+                                    && e.Date <= g.Deadline)
+                        .Sum(e => e.Amount)
+                })
+                .ToListAsync();
+
             return Ok(goals);
         }
+
+
+
+
 
         [HttpPost]
         public async Task<IActionResult> CreateGoal([FromBody] Goal goal)
@@ -121,14 +141,14 @@ namespace FinanceTracker.API.Controllers
                     .ToListAsync();
 
                 if (!expenses.Any())
-                    return Ok(new List<Goal>()); // Return an empty array
+                    return Ok(new List<Goal>()); 
 
                 var goalHelper = new GoalSuggestionHelper();
                 var model = goalHelper.TrainGoalSuggestionModel(expenses);
 
                 var futureData = expenses.FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.Category));
                 if (futureData == null)
-                    return Ok(new List<Goal>()); // Return an empty array
+                    return Ok(new List<Goal>()); 
 
                 var predictedCategory = goalHelper.PredictGoalCategory(model, futureData);
 
@@ -137,15 +157,15 @@ namespace FinanceTracker.API.Controllers
                     Title = $"Save for {predictedCategory} expenses",
                     Category = predictedCategory,
                     TargetAmount = (decimal)(futureData.TotalAmount * 1.2f),
-                    Deadline = DateTime.UtcNow.AddMonths(6)
+                    Deadline = DateTime.UtcNow.AddMonths(1)
                 };
 
-                // Return an array with a single item
+                
                 return Ok(new List<Goal> { suggestedGoal });
             }
             catch (Exception ex)
             {
-                // Log the error
+               
                 Console.Error.WriteLine($"Error in GetGoalSuggestions: {ex.Message}");
                 return StatusCode(500, new { Message = "An error occurred while processing your request." });
             }

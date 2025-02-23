@@ -10,21 +10,21 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Configure DbContext
+
 builder.Services.AddDbContext<FinanceTrackerDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Configure Identity
+
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
     .AddEntityFrameworkStores<FinanceTrackerDbContext>()
     .AddDefaultTokenProviders();
 
-// Configure JWT Authentication
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -39,7 +39,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
         };
 
-        // Enable SignalR support for JWT Authentication
+        
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = context =>
@@ -61,24 +61,24 @@ builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Events.OnRedirectToLogin = context =>
     {
-        context.Response.StatusCode = 401; // Return 401 Unauthorized
+        context.Response.StatusCode = 401; 
         return Task.CompletedTask;
     };
 });
 
-// Add CORS policy
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3000") // Frontend URL
+        policy.WithOrigins("http://localhost:3000") 
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials(); // SignalR requires AllowCredentials
+              .AllowCredentials(); 
     });
 });
 
-// Add SignalR and other services
+
 builder.Services.AddSignalR();
 builder.Services.AddScoped<NotificationService>();
 builder.Services.AddHostedService<MonthlySummaryService>();
@@ -88,7 +88,7 @@ builder.Services.AddHttpClient<SaltEdgeService>();
 
 var app = builder.Build();
 
-// Configure middleware
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -97,12 +97,12 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.UseCors("AllowFrontend"); // Apply the CORS policy
+app.UseCors("AllowFrontend"); 
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-app.MapHub<NotificationsHub>("/notificationshub"); // Map SignalR hub
+app.MapHub<NotificationsHub>("/notificationshub"); 
 
 app.Run();
